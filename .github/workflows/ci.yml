@@ -1,0 +1,145 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Conn3x
+        env: &gh
+          GH_TOKEN: ${{ github.token }}
+        run: &install |
+          tag=$(gh release view -R conn3xorg/conn3x --json tagName -q .tagName)
+          file="conn3x_${tag#v}_linux_amd64.tar.gz"
+          cd "$RUNNER_TEMP"
+          curl -sSfLO "https://github.com/conn3xorg/conn3x/releases/download/$tag/$file"
+          curl -sSfLO "https://github.com/conn3xorg/conn3x/releases/download/$tag/checksums.txt"
+          grep " $file\$" checksums.txt | sha256sum -c -
+          mkdir -p bin && tar -xzf "$file" -C bin conn3x
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - run: conn3x version
+      - run: conn3x fmt -check -recursive
+      - name: Validate
+        run: conn3x init -backend=false && conn3x validate
+      - name: Validate the example
+        working-directory: examples/local
+        run: conn3x init -backend=false && conn3x validate
+      # Without the licence accepted, the plan stops before it reads a host.
+      - name: Refuse to plan without the licence accepted
+        working-directory: examples/local
+        env:
+          TF_VAR_admin_password: Ci0nlyPassw0rd
+        run: |
+          sed -i 's/accept_oracle_license = true/accept_oracle_license = false/' main.tf
+          if conn3x plan -no-color > plan.txt 2>&1; then
+            echo "The plan went ahead with accept_oracle_license = false." >&2
+            exit 1
+          fi
+          grep -q 'oracle-free-license.html' plan.txt
+
+  e2e:
+    needs: validate
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Conn3x's test image for Rocky Linux 10.
+          - distro: rocky10
+            containerfile: conn3x/test/images/rocky10/Containerfile
+          # The example's own image.
+          - distro: rocky9
+            containerfile: examples/local/Containerfile
+    name: e2e (${{ matrix.distro }})
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The test host images live in the Conn3x repo.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: conn3xorg/conn3x
+          ref: main
+          path: conn3x
+          persist-credentials: false
+          sparse-checkout: test/images
+      - name: Install Conn3x
+        env: *gh
+        run: *install
+      - name: Start the ${{ matrix.distro }} host
+        working-directory: examples/local
+        env:
+          CONTAINERFILE: ${{ github.workspace }}/${{ matrix.containerfile }}
+          # systemd in the host container is simplest under rootful Podman.
+          PODMAN: sudo podman
+        run: ./up.sh
+      - name: Apply, then plan again with no changes
+        working-directory: examples/local
+        env:
+          TF_VAR_admin_password: Ci0nlyPassw0rd
+        run: |
+          conn3x init
+          conn3x apply -auto-approve
+          conn3x plan -detailed-exitcode
+      # The password reaches the host write-only, so state holds none of it,
+      # and nothing Conn3x writes under .terraform does either.
+      # .terraform/modules is left out: it holds downloaded module code.
+      - name: Check the password stays out of state
+        working-directory: examples/local
+        run: |
+          if grep -rqF --exclude-dir=modules -e Ci0nlyPassw0rd terraform.tfstate .terraform/; then
+            echo "The example's password is in terraform.tfstate or under .terraform/." >&2
+            exit 1
+          fi
+      # SYSTEM logs in to FREEPDB1 over the listener, writes a row and reads
+      # it back. A wrong password is refused.
+      - name: Write and read a row over the listener
+        run: |
+          sudo podman exec -i circuit-oracle-free sh -eu <<'EOF'
+          sq='runuser -u oracle -- env ORACLE_HOME=/opt/oracle/product/26ai/dbhomeFree /opt/oracle/product/26ai/dbhomeFree/bin/sqlplus -S -L /nolog'
+          printf '%s\n' 'connect system/"Ci0nlyPassw0rd"@//127.0.0.1:1521/FREEPDB1' 'whenever sqlerror exit failure' 'set heading off feedback off' \
+            'create table conn3x_t (id number primary key, v varchar2(20));' "insert into conn3x_t values (1, 'hello');" 'commit;' \
+            'select v from conn3x_t where id = 1;' | $sq | grep -qx hello
+          printf '%s\n' 'connect system/"Wr0ngPassword"@//127.0.0.1:1521/FREEPDB1' | $sq | grep -q ORA-01017
+          EOF
+      # Restarting the container boots systemd again, so this checks the
+      # database is enabled and comes back with its data.
+      - name: Restart the host, then read the row again
+        run: |
+          sudo podman restart circuit-oracle-free
+          for _ in $(seq 60); do
+            case $(sudo podman exec circuit-oracle-free systemctl is-system-running 2>/dev/null) in running|degraded) break ;; esac
+            sleep 1
+          done
+          sudo podman exec circuit-oracle-free systemctl is-active oracle-free-26ai
+          sudo podman exec -i circuit-oracle-free sh -eu <<'EOF'
+          sq='runuser -u oracle -- env ORACLE_HOME=/opt/oracle/product/26ai/dbhomeFree /opt/oracle/product/26ai/dbhomeFree/bin/sqlplus -S -L /nolog'
+          for _ in $(seq 60); do
+            printf '%s\n' 'connect system/"Ci0nlyPassw0rd"@//127.0.0.1:1521/FREEPDB1' 'set heading off feedback off' \
+              'select v from conn3x_t where id = 1;' | $sq | grep -qx hello && exit 0
+            sleep 5
+          done
+          exit 1
+          EOF
+      - name: Plan again after the restart, with no changes
+        working-directory: examples/local
+        env:
+          TF_VAR_admin_password: Ci0nlyPassw0rd
+        run: conn3x plan -detailed-exitcode
+      - name: Clean up
+        if: always()
+        working-directory: examples/local
+        env:
+          PODMAN: sudo podman
+        run: ./down.sh

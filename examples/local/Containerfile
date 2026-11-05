@@ -1,0 +1,12 @@
+# A throwaway Rocky Linux 9 host with systemd and sshd, for trying this
+# circuit. Rocky Linux 9 because Oracle builds Database Free for EL9 on
+# both x86_64 and aarch64, and for EL10 on x86_64 only.
+FROM docker.io/rockylinux/rockylinux:9-ubi-init
+
+RUN dnf -y install openssh-server sudo \
+ && ssh-keygen -A \
+ && systemctl enable sshd \
+ && mkdir -p -m 700 /root/.ssh
+
+EXPOSE 22
+CMD ["/sbin/init"]
