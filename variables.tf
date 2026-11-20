@@ -65,21 +65,21 @@ variable "admin_password" {
 
 variable "oracle_free_version" {
   type        = string
-  default     = "23.26.3-1"
-  description = "Release of the oracle-ai-database-free-26ai RPM, such as \"23.26.3-1\". Change oracle_free_sha256 with it. Raising it installs the new RPM over the old one."
+  default     = "23.26.4-1"
+  description = "Release of the oracle-ai-database-free-26ai RPM, such as \"23.26.4-1\". Change oracle_free_sha256 with it. Raising it installs the new RPM over the old one."
 
   validation {
     condition     = can(regex("^23\\.26\\.[0-9]+-[0-9]+$", var.oracle_free_version))
-    error_message = "oracle_free_version must be a 26ai Free RPM release, such as \"23.26.3-1\"."
+    error_message = "oracle_free_version must be a 26ai Free RPM release, such as \"23.26.4-1\"."
   }
 }
 
 variable "oracle_free_sha256" {
   type = map(string)
   default = {
-    "el9.x86_64"  = "895fc9df794685b515c4ac83f104dbdfb657eb0e92c41e45c58302fb8fd53e44"
-    "el9.aarch64" = "b2a087b8e6d67d99f0cd9b950429b4afd58b71991fd05b5d6254ac84cade94e1"
-    "el10.x86_64" = "ddaae3565cdd1b9c0d6eb35f7c1ae630a83068dfbadf31fe7b1c6e169eaa5798"
+    "el9.x86_64"  = "6da5c76237f8034849da36cd8e8d5f51d750b7ae7ee89248979f29a0ed504b8b"
+    "el9.aarch64" = "a4701f00bbe9a6f9813961558f2d4b1409209f06c770cd04d9535d689b826bf6"
+    "el10.x86_64" = "d8981e388a00e16daed4fdadf9418af4fa6605908df4c71746a7c2d2bd07fce4"
   }
   description = "SHA-256 of each build of the RPM, from Oracle's download page, by build: el9.x86_64, el9.aarch64 and el10.x86_64. Change it with oracle_free_version."
 
