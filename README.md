@@ -98,7 +98,7 @@ Oracle builds Database Free for these, and the circuit stops at the plan on any 
 
 ## Requirements
 
-Requires Conn3x v0.7.0 or later, Rocky Linux 9 or 10 with systemd, outbound HTTPS to download.oracle.com, yum.oracle.com and Rocky Linux's mirrors, at least 1 GB of free memory when the database is created, and about 10 GB of disk.
+Requires Conn3x v0.29.0 or later, Rocky Linux 9 or 10 with systemd, outbound HTTPS to download.oracle.com, yum.oracle.com and Rocky Linux's mirrors, at least 1 GB of free memory when the database is created, and about 10 GB of disk.
 
 ## Tested on
 

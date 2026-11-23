@@ -203,8 +203,8 @@ circuit "oracle_free" {
   }
 
   step "reload" {
-    command {
-      command  = "systemctl daemon-reload"
+    service_action {
+      action   = "daemon-reload"
       triggers = { unit = conn3x_file.oracle_free__unit[each.key].revision }
     }
   }
@@ -217,7 +217,7 @@ circuit "oracle_free" {
       state   = "started"
       enabled = true
     }
-    depends_on = [conn3x_command.oracle_free__reload, conn3x_command.oracle_free__configure]
+    depends_on = [conn3x_service_action.oracle_free__reload, conn3x_command.oracle_free__configure]
   }
 
   # SYS, SYSTEM and PDBADMIN share the password. When SYSTEM can't log in
